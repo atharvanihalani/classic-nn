@@ -1,0 +1,1 @@
+No-frills implementation of a NN to classify MNist.
