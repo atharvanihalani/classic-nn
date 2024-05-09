@@ -1,3 +1,4 @@
 todo
     figure out loss lmao
     and finish model ofc
+    batch processing
