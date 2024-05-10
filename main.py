@@ -52,8 +52,12 @@ class DenseLayer():
         denom = np.reshape(np.sum(out, 1), (-1, 1))
         out = out / denom
 
-        #confirm that this has size 60000 * 10 * 10
-        self.activation_jacobian = [[[-out[i]*out[j] for j in range(len(row))] for i in range(len(row))] + np.fill_diagonal(np.zeros((len(row), len(row))), row) for row in out] 
+        self.activation_jacobian = []
+        for row in out:
+            diag = np.zeros((len(row), len(row)), dtype=np.float64)
+            np.fill_diagonal(diag, row)
+            temp = np.array([[-row[i]*row[j] for j in range(len(row))] for i in range(len(row))]) + diag
+            self.activation_jacobian.append(temp)
         self.activation_jacobian = np.array(self.activation_jacobian)
         return out
     
@@ -72,10 +76,13 @@ class LossLayer():
         pass
 
     def rms(self, inputs, fax):
-        out_points = np.sqrt(np.mean(np.square(inputs - fax), 1))
+        oh_fax = np.zeros((len(fax), 10))
+        oh_fax[np.arange(fax.size), fax] = 1
+
+        out_points = np.sqrt(np.mean(np.square(inputs - oh_fax), 1, keepdims=True))
         out = np.mean(out_points) # takes the average loss over the batch
 
-        self.input_grads = (1/(inputs.shape[0] * inputs.shape[1] * out_points)) * (inputs - fax)
+        self.input_grads = (1/(inputs.shape[0] * inputs.shape[1] * out_points)) * (inputs - oh_fax)
         return out
     
     def get_input_grads(self):
@@ -100,13 +107,16 @@ class Model():
 
         for i in range(30):
             next = inputs[i*2000 : (i+1)*2000]
+            bfax = fax[i*2000 : (i+1)*2000]
+            
             for layer in self.layers:
                 next = layer.call(next)
-            preds = np.argmax(next, 1)
-            
-            fax = fax[i*2000 : (i+1)*2000]
-            # one-hot encode fax
-            loss = self.loss(next, fax)
+            loss = self.loss.call(next, bfax)
+
+            preds = np.argmax(next, 1) 
+            accuracy = np.count_nonzero(preds == bfax)
+
+            print(f'batch: {i+1}/30 \n loss: {loss} \n accuracy = {accuracy}/{60000 / 30}')
             # calc / update gradients
             pass
 
@@ -118,10 +128,12 @@ def main():
     x_train = x_train / 256
     x_test = np.reshape(x_test, (10000, 28*28))
     x_test = x_test / 256
+    y_train = np.array(y_train)
+    y_test = np.array(y_test)
 
 
     model = Model()
-    test_out = model.train(x_train)
+    test_out = model.train(x_train, y_train)
     pass
     
 
