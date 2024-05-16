@@ -6,8 +6,8 @@ class DenseLayer():
     init layer with input / output size
     '''
     def __init__(self, dims: tuple, is_final=False) -> None:
-        self.weights = np.random.normal(0, 1, dims)
-        self.biases = np.random.normal(0, 1, dims[1])
+        self.weights = np.random.normal(0, np.sqrt(1/dims[0]), dims)
+        self.biases = np.random.normal(0, np.sqrt(1/dims[0]), dims[1])
         self.activation = self.softmax if is_final else self.leaky_relu
 
     def call(self, inputs):
@@ -27,11 +27,12 @@ class DenseLayer():
         '''
         gradients = []
         for i in range(len(downstream)):
-            gradients.append(np.matmul(downstream[i], self.activation_jacobian))
+            gradients.append(np.matmul(downstream[i], self.activation_jacobian[i]))
         #should have dims (60000, 1, 10)
         gradients = np.array(gradients) # collapse dims here if need to
 
-        self.biases -= nabla * np.mean(gradients, 0)
+        temp = nabla * np.mean(gradients, 0)
+        self.biases -= temp
 
         weight_grads = []
         for i in range(len(gradients)):
@@ -44,7 +45,13 @@ class DenseLayer():
         out = np.array([[val if val > 0 else 0.1*val for val in row] for row in input])
 
         #confirm that masked array & this have same output when composed
-        self.activation_jacobian = [np.fill_diagonal(np.zeros((len(row), len(row))), [1 if i > 0 else 0.1 for i in row]) for row in out] 
+        # self.activation_jacobian = [np.fill_diagonal(np.zeros((len(row), len(row))), [1 if i > 0 else 0.1 for i in row]) for row in out] 
+        self.activation_jacobian = []
+        for row in out:
+            zeros = np.zeros((len(row), len(row)))
+            np.fill_diagonal(zeros, [1 if i > 0 else 0.1 for i in row])
+            self.activation_jacobian.append(zeros)
+        self.activation_jacobian = np.array(self.activation_jacobian)
         return out
     
     def softmax(self, input):
@@ -82,7 +89,7 @@ class LossLayer():
         out_points = np.sqrt(np.mean(np.square(inputs - oh_fax), 1, keepdims=True))
         out = np.mean(out_points) # takes the average loss over the batch
 
-        self.input_grads = (1/(inputs.shape[0] * inputs.shape[1] * out_points)) * (inputs - oh_fax)
+        self.input_grads = (1/(inputs.shape[1] * out_points)) * (inputs - oh_fax)
         return out
     
     def get_input_grads(self):
@@ -100,25 +107,44 @@ class Model():
             DenseLayer((28*28, 64)),
             DenseLayer((64, 10), True),
         ]
-        self.loss = LossLayer(False)
+        self.loss_layer = LossLayer(False)
     
     def train(self, inputs, fax):
         '''inputs: batch size X 28*28'''
-
-        for i in range(30):
-            next = inputs[i*2000 : (i+1)*2000]
-            bfax = fax[i*2000 : (i+1)*2000]
-            
+        for i in range(500):
+            next = inputs
             for layer in self.layers:
                 next = layer.call(next)
-            loss = self.loss.call(next, bfax)
+            loss = self.loss_layer.call(next, fax)
 
-            preds = np.argmax(next, 1) 
-            accuracy = np.count_nonzero(preds == bfax)
+            preds = np.argmax(next, 1)
+            accuracy = np.count_nonzero(preds == fax)
 
-            print(f'batch: {i+1}/30 \n loss: {loss} \n accuracy = {accuracy}/{60000 / 30}')
-            # calc / update gradients
-            pass
+            current_grads = self.loss_layer.get_input_grads()
+            current_grads = self.layers[1].update_grads(current_grads, 4)
+            current_grads = self.layers[0].update_grads(current_grads, 4)
+
+            print(f'epoch: {i+1} \n loss: {loss} \n accuracy = {accuracy}/{len(fax)}')
+
+        # for i in range(30):
+        #     next = inputs[i*2000 : (i+1)*2000]
+        #     bfax = fax[i*2000 : (i+1)*2000]
+            
+        #     for layer in self.layers:
+        #         next = layer.call(next)
+        #     loss = self.loss_layer.call(next, bfax)
+
+        #     preds = np.argmax(next, 1) 
+        #     accuracy = np.count_nonzero(preds == bfax)
+
+        #     current_grads = self.loss_layer.get_input_grads()
+        #     for j in range(len(self.layers)-1, -1, -1):
+        #         current_grads = self.layers[j].update_grads(current_grads, 0.2)
+        #         pass
+                
+        #     # calc / update gradients
+        #     print(f'batch: {i+1}/30 \n loss: {loss} \n accuracy = {accuracy}/{60000 / 30}')
+        #     pass
 
         return preds
 
@@ -131,9 +157,11 @@ def main():
     y_train = np.array(y_train)
     y_test = np.array(y_test)
 
+    x_train_small = x_train[:1000]
+    y_train_small = y_train[:1000]
 
     model = Model()
-    test_out = model.train(x_train, y_train)
+    test_out = model.train(x_train_small, y_train_small)
     pass
     
 

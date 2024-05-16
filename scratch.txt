@@ -1,4 +1,3 @@
 todo
-    figure out loss lmao
-    and finish model ofc
-    batch processing
+    cross entropy loss
+    confirm backprop working
