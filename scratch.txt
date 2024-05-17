@@ -1,3 +1,0 @@
-todo
-    cross entropy loss
-    confirm backprop working

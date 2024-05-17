@@ -28,24 +28,20 @@ class DenseLayer():
         gradients = []
         for i in range(len(downstream)):
             gradients.append(np.matmul(downstream[i], self.activation_jacobian[i]))
-        #should have dims (60000, 1, 10)
-        gradients = np.array(gradients) # collapse dims here if need to
+        gradients = np.array(gradients) 
 
-        temp = nabla * np.mean(gradients, 0)
-        self.biases -= temp
+        self.biases -= nabla * np.mean(gradients, 0)
 
         weight_grads = []
         for i in range(len(gradients)):
             weight_grads.append([[input * dw for dw in gradients[i]] for input in self.inputs[i]])
         self.weights -= nabla * np.mean(weight_grads, 0)
 
-        return gradients @ self.weights.T # this should be 60000 * 64
+        return gradients @ self.weights.T 
 
     def leaky_relu(self, input):
         out = np.array([[val if val > 0 else 0.1*val for val in row] for row in input])
 
-        #confirm that masked array & this have same output when composed
-        # self.activation_jacobian = [np.fill_diagonal(np.zeros((len(row), len(row))), [1 if i > 0 else 0.1 for i in row]) for row in out] 
         self.activation_jacobian = []
         for row in out:
             zeros = np.zeros((len(row), len(row)))
@@ -74,13 +70,20 @@ class LossLayer():
     RMS or CE w/ logits
     '''
     def __init__(self, CE=True) -> None:
-        self.loss = self.ce_logits if CE else self.rms
+        self.loss = self.ce_logits if CE else self.mse
     
     def call(self, inputs, fax):
         return self.loss(inputs, fax)
     
     def ce_logits(self, inputs, fax):
-        pass
+        out_probmax = [inputs[i][fax[i]] for i in range(len(inputs))]
+        out = -1 * np.mean(np.log(out_probmax))
+        
+        self.input_grads = np.zeros_like(inputs)
+        for i in range(len(inputs)):
+            self.input_grads[i][fax[i]] = -1 / out_probmax[i]
+
+        return out
 
     def rms(self, inputs, fax):
         oh_fax = np.zeros((len(fax), 10))
@@ -89,64 +92,59 @@ class LossLayer():
         out_points = np.sqrt(np.mean(np.square(inputs - oh_fax), 1, keepdims=True))
         out = np.mean(out_points) # takes the average loss over the batch
 
-        self.input_grads = (1/(inputs.shape[1] * out_points)) * (inputs - oh_fax)
+        self.input_grads = (inputs - oh_fax) / (inputs.shape[0] * inputs.shape[1] * out_points) 
+        return out
+    
+    def mse(self, inputs, fax):
+        oh_fax = np.zeros((len(fax), 10))
+        oh_fax[np.arange(fax.size), fax] = 1
+
+        out = np.mean(np.square(inputs - oh_fax))
+
+        self.input_grads = (inputs - oh_fax) / np.prod(inputs.shape)
         return out
     
     def get_input_grads(self):
         return self.input_grads
 
 class Model():
-
     def __init__(self) -> None:
-        # self.layers = [
-        #     DenseLayer((28*28, 128)),
-        #     DenseLayer((128, 32)),
-        #     DenseLayer((32, 10), True),
-        # ]
         self.layers = [
             DenseLayer((28*28, 64)),
             DenseLayer((64, 10), True),
         ]
-        self.loss_layer = LossLayer(False)
+        self.loss_layer = LossLayer(True)
     
     def train(self, inputs, fax):
-        '''inputs: batch size X 28*28'''
-        for i in range(500):
-            next = inputs
+        for i in range(30):
+            next = inputs[i*2000 : (i+1)*2000]
+            bfax = fax[i*2000 : (i+1)*2000]
+            
             for layer in self.layers:
                 next = layer.call(next)
-            loss = self.loss_layer.call(next, fax)
+            loss = self.loss_layer.call(next, bfax)
 
-            preds = np.argmax(next, 1)
-            accuracy = np.count_nonzero(preds == fax)
+            preds = np.argmax(next, 1) 
+            accuracy = np.count_nonzero(preds == bfax)
 
             current_grads = self.loss_layer.get_input_grads()
-            current_grads = self.layers[1].update_grads(current_grads, 4)
-            current_grads = self.layers[0].update_grads(current_grads, 4)
-
-            print(f'epoch: {i+1} \n loss: {loss} \n accuracy = {accuracy}/{len(fax)}')
-
-        # for i in range(30):
-        #     next = inputs[i*2000 : (i+1)*2000]
-        #     bfax = fax[i*2000 : (i+1)*2000]
-            
-        #     for layer in self.layers:
-        #         next = layer.call(next)
-        #     loss = self.loss_layer.call(next, bfax)
-
-        #     preds = np.argmax(next, 1) 
-        #     accuracy = np.count_nonzero(preds == bfax)
-
-        #     current_grads = self.loss_layer.get_input_grads()
-        #     for j in range(len(self.layers)-1, -1, -1):
-        #         current_grads = self.layers[j].update_grads(current_grads, 0.2)
-        #         pass
+            for j in range(len(self.layers)-1, -1, -1):
+                current_grads = self.layers[j].update_grads(current_grads, 0.2)
                 
-        #     # calc / update gradients
-        #     print(f'batch: {i+1}/30 \n loss: {loss} \n accuracy = {accuracy}/{60000 / 30}')
-        #     pass
+            # calc / update gradients
+            print(f'batch: {i+1}/30 \n loss: {loss} \n accuracy = {accuracy}/{len(inputs) / 30}')
+    
+    def test(self, inputs, fax):
+        next = inputs
+        
+        for layer in self.layers:
+            next = layer.call(next)
+        loss = self.loss_layer.call(next, fax)
+        
+        preds = np.argmax(next, 1)
+        accuracy = np.count_nonzero(preds == fax)
 
-        return preds
+        print(f'\n\ntesting metrics:\n loss: {loss} \n accuracy = {accuracy}/{len(inputs)}')
 
 def main():
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
@@ -161,8 +159,7 @@ def main():
     y_train_small = y_train[:1000]
 
     model = Model()
-    test_out = model.train(x_train_small, y_train_small)
-    pass
-    
+    model.train(x_train, y_train)
+    model.test(x_test, y_test)
 
 main()
